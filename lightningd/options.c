@@ -222,7 +222,7 @@ static char *opt_add_addr_withtype(const char *arg,
 	assert(arg != NULL);
 	dns_ok = !ld->always_use_proxy && ld->config.use_dns;
 
-	/* Will be overridden in next call iff has port */
+	/* Will be overridden in next call, if it has a port */
 	port = 0;
 	if (!separate_address_and_port(tmpctx, arg, &address, &port))
 		return tal_fmt(NULL, "Unable to parse address:port '%s'", arg);
@@ -230,6 +230,7 @@ static char *opt_add_addr_withtype(const char *arg,
 	if (is_ipaddr(address)
 	    || is_toraddr(address)
 	    || is_wildcardaddr(address)
+	    || (is_dnsaddr(address) && !ld->announce_dns)
 	    || ala != ADDR_ANNOUNCE) {
 		if (!parse_wireaddr_internal(arg, &wi, ld->portnum,
 					     wildcard_ok, dns_ok, false,
@@ -254,7 +255,7 @@ static char *opt_add_addr_withtype(const char *arg,
 	}
 
 	/* Add ADDR_TYPE_DNS to announce DNS hostnames */
-	if (is_dnsaddr(address) && ala & ADDR_ANNOUNCE) {
+	if (is_dnsaddr(address) && ld->announce_dns && (ala & ADDR_ANNOUNCE)) {
 		/* BOLT-hostnames #7:
 		 * The origin node:
 		 * ...
@@ -516,9 +517,15 @@ static char *opt_set_hsm_password(struct lightningd *ld)
 	int is_encrypted;
 
         is_encrypted = is_hsm_secret_encrypted("hsm_secret");
+	/* While lightningd is performing the first initialization
+	 * this check is always true because the file does not exist.
+	 *
+	 * Maybe the is_hsm_secret_encrypted is performing a not useful
+	 * check at this stage, but the hsm is a delicate part,
+	 * so it is a good information to have inside the log. */
 	if (is_encrypted == -1)
-		return tal_fmt(NULL, "Could not access 'hsm_secret': %s",
-			       strerror(errno));
+		log_info(ld->log, "'hsm_secret' does not exist (%s)",
+			 strerror(errno));
 
 	prompt(ld, "The hsm_secret is encrypted with a password. In order to "
 	       "decrypt it and start the node you must provide the password.");
@@ -1097,6 +1104,10 @@ static void register_opts(struct lightningd *ld)
 	opt_register_early_noarg("--experimental-shutdown-wrong-funding",
 				 opt_set_shutdown_wrong_funding, ld,
 				 "EXPERIMENTAL: allow shutdown with alternate txids");
+	opt_register_early_arg("--announce-addr-dns",
+			       opt_set_bool_arg, opt_show_bool,
+			       &ld->announce_dns,
+			       "Use DNS entries in --announce-addr and --addr (not widely supported!)");
 
 	opt_register_noarg("--help|-h", opt_lightningd_usage, ld,
 				 "Print this message.");
